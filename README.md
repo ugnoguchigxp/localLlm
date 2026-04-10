@@ -1,117 +1,100 @@
-# Gemma 4 Local Runtime (MLX + OpenAI-Compatible API)
+# Gemma 4 Local Runtime (MLX + Ollama + Bonsai)
 
-このリポジトリは、Gemma 4 (MLX) を以下の2つで利用できる構成です。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
-- OpenAI互換 REST API (`/v1/chat/completions`, `/v1/models`)
-- MCP Tools Server (`web_search`, `fetch_content`)
+このプロジェクトは、Apple Silicon (MLX) や Ollama を活用して、高性能な LLM ローカル実行環境および自律型エージェント機能を提供します。
 
-既存の CLI チャット (`mlx_chat.py`, `mlx_chat_mcp.py`, `scripts/gemma4`) も維持しています。
+## ✨ 特徴
 
-## セットアップ
+- **マルチバックエンド対応**: MLX (Gemma 4, Bonsai) と Ollama をシームレスに切り替え。
+- **自律型エージェント**: Web検索 (`Brave Search`) やウェブスクレイピング機能を搭載したツール実行機能。
+- **OpenAI 互換 API**: `/v1/chat/completions` エンドポイントを提供し、Zed, VSCode (Continue) 等の IDE から利用可能。
+- **MCP (Model Context Protocol)**: 外部ツールを標準化されたプロトコルで呼び出し可能。
+- **高速な CLI**: ターミナルから直接モデルと対話できる専用スクリプト群。
+
+---
+
+## 🚀 クイックスタート
+
+### 1. プロジェクトの準備
 
 ```bash
+git clone https://github.com/YOUR_USERNAME/localLlm.git
+cd localLlm
+
+# 仮想環境の作成とライブラリのインストール
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+
+# 環境設定
 cp .env.example .env
 ```
 
-`.env` には最低限 `BRAVE_SEARCH_API_KEY` を設定してください（Web検索ツールを使う場合）。
+`.env` 内の `BRAVE_SEARCH_API_KEY` を設定すると、Web検索ツールが有効になります。
 
-## ディレクトリ構成
+### 2. インストール手順 (バックエンド別)
 
-```text
-gemma4/
-├── core/
-│   ├── model.py          # MLXモデル管理
-│   └── chat_engine.py    # ツール呼び出し対応チャット実行
-├── api/
-│   ├── main.py           # FastAPIアプリ
-│   ├── schemas.py        # OpenAI互換スキーマ
-│   └── routes/
-│       ├── chat.py       # /v1/chat/completions
-│       └── models.py     # /v1/models
-├── mcp/
-│   └── tools_server.py   # MCP tools server 実体
-├── mcp_server.py         # 互換エントリーポイント
-├── tools.py              # Web検索・スクレイピング実装
-├── mlx_chat.py           # 既存CLI (直接ツール実行)
-└── mlx_chat_mcp.py       # 既存CLI (MCP経由)
+#### 🦙 Ollama
+[Ollama 公式サイト](https://ollama.com/) からアプリをダウンロードしてインストールしてください。
+
+```bash
+# 推奨モデルのプル
+ollama pull llama3
 ```
 
-## OpenAI互換 API の起動
+#### 💎 Gemma 4 (MLX)
+Apple Silicon Mac を使用している場合、MLX バックエンドを推奨します。
+
+```bash
+# MLX 版 Gemma 4 のセットアップ（初回実行時に自動ダウンロードされます）
+./scripts/gemma4 "Hello, who are you?"
+```
+
+#### 🌳 Bonsai (MLX)
+Bonsai は MLX 最適化された高性能 8B モデルです。
+
+```bash
+# Bonsai の実行（初回実行時に自動ダウンロードされます）
+./scripts/bonsai "複雑なアルゴリズムについて解説して"
+```
+
+### 3. PATH の設定 (推奨)
+
+以下のスクリプトを実行することで、どこからでも `gemma4` などのコマンドを実行できるようになります。
+
+```bash
+bash scripts/install_path.sh
+# 実行後、指示に従って shell を再起動または source してください
+```
+
+---
+
+## 🛠️ ディレクトリ構成
+
+```text
+.
+├── scripts/            # 実行用ショートカットスクリプト (gemma4, bonsai, ollama-v4)
+├── core/               # モデル制御・チャットエンジンのコアロジック
+├── api/                # OpenAI 互換 FastAPI 実装
+├── backends/           # MLX, Ollama などのバックエンド抽象化
+├── mcp/                # MCP Server 実装
+├── tools.py            # Web検索・スクレイピングツールの実装
+└── main.py             # メインエントリポイント
+```
+
+---
+
+## 🌐 OpenAI 互換 API の利用
+
+API サーバーを起動することで、既存の OpenAI クライアントや IDE 拡張からローカル LLM を利用できます。
 
 ```bash
 ./scripts/run_openai_api.sh
-# または
-uvicorn api.main:app --host 0.0.0.0 --port 44448
 ```
 
-OpenAPI は以下で確認できます。
-
-- [http://localhost:44448/docs](http://localhost:44448/docs)
-
-## API 利用例
-
-### モデル一覧
-
-```bash
-curl http://localhost:44448/v1/models
-```
-
-### Chat Completions (非ストリーム)
-
-```bash
-curl http://localhost:44448/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemma-4-e4b-it",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "stream": false
-  }'
-```
-
-### Chat Completions (ストリーム)
-
-```bash
-curl -N http://localhost:44448/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemma-4-e4b-it",
-    "messages": [{"role": "user", "content": "Pythonの最新情報を教えて"}],
-    "stream": true
-  }'
-```
-
-### ツール呼び出しを許可するリクエスト
-
-```bash
-curl http://localhost:44448/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemma-4-e4b-it",
-    "messages": [{"role": "user", "content": "最新のLLMニュースを調べて"}],
-    "stream": false,
-    "tools": [
-      {
-        "type": "function",
-        "function": {
-          "name": "search_web",
-          "description": "Search the web",
-          "parameters": {
-            "type": "object",
-            "properties": {
-              "query": {"type": "string"}
-            },
-            "required": ["query"]
-          }
-        }
-      }
-    ]
-  }'
-```
-
-## IDE 設定例
-
-### Zed
+### IDE 設定例 (Zed)
 
 ```json
 {
@@ -125,35 +108,18 @@ curl http://localhost:44448/v1/chat/completions \
 }
 ```
 
-### VSCode / Continue
+---
 
-```json
-{
-  "continue.models": [
-    {
-      "title": "Gemma 4 Local",
-      "provider": "openai",
-      "baseUrl": "http://localhost:44448/v1",
-      "model": "gemma-4-e4b-it"
-    }
-  ]
-}
-```
+## 🔌 MCP Tools Server
 
-## MCP Tools Server
-
-既存と同じ起動方法です。
+MCP 対応クライアントからツールを利用する場合：
 
 ```bash
 python mcp_server.py
 ```
 
-`mcp_server.py` は互換エントリーポイントで、実体は `mcp/tools_server.py` です。
+---
 
-## 既存CLI
+## 📜 ライセンス
 
-```bash
-gemma4
-python mlx_chat.py
-python mlx_chat_mcp.py
-```
+[MIT License](LICENSE)

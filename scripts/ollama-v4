@@ -6,4 +6,4 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_NAME="llama3"
 
 source "${ROOT_DIR}/.venv/bin/activate"
-python "${ROOT_DIR}/main.py" --backend ollama --model "${MODEL_NAME}" "$@"
+python3 "${ROOT_DIR}/main.py" --backend ollama --model "${MODEL_NAME}" "$@"
