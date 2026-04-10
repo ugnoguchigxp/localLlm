@@ -10,7 +10,7 @@ async def test_mcp():
     print("Starting MCP connection test...")
     
     server_params = StdioServerParameters(
-        command="python",
+        command=sys.executable,
         args=["./mcp_server.py"],
         env=None
     )

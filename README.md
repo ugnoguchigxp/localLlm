@@ -1,93 +1,159 @@
-# Gemma on Apple M4 (ANE/MLX)
+# Gemma 4 Local Runtime (MLX + OpenAI-Compatible API)
 
-このフォルダは、Apple M4 で **Gemma 4** を効率的に動かすための作業ディレクトリです。  
-32GB RAM を搭載した M4 Mac 用に最適化されており、**MLX** フレームワークを使用して Gemma 4 モデル (E4B / 26B) を実行します。
+このリポジトリは、Gemma 4 (MLX) を以下の2つで利用できる構成です。
 
-## 1) セットアップ (Gemma 4 / MLX)
+- OpenAI互換 REST API (`/v1/chat/completions`, `/v1/models`)
+- MCP Tools Server (`web_search`, `fetch_content`)
+
+既存の CLI チャット (`mlx_chat.py`, `mlx_chat_mcp.py`, `scripts/gemma4`) も維持しています。
+
+## セットアップ
 
 ```bash
-# 依存関係のインストール
 pip install -r requirements.txt
-
-# MLX 環境の構築とモデルのダウンロード
-./scripts/run_mlx_chat.sh
+cp .env.example .env
 ```
 
-初回実行時にモデル (`mlx-community/gemma-4-e4b-it-4bit`) が自動的にダウンロードされます。
+`.env` には最低限 `BRAVE_SEARCH_API_KEY` を設定してください（Web検索ツールを使う場合）。
 
-### 環境変数の設定
+## ディレクトリ構成
 
-`.env` ファイルを作成し、Brave Search API キーを設定してください：
+```text
+gemma4/
+├── core/
+│   ├── model.py          # MLXモデル管理
+│   └── chat_engine.py    # ツール呼び出し対応チャット実行
+├── api/
+│   ├── main.py           # FastAPIアプリ
+│   ├── schemas.py        # OpenAI互換スキーマ
+│   └── routes/
+│       ├── chat.py       # /v1/chat/completions
+│       └── models.py     # /v1/models
+├── mcp/
+│   └── tools_server.py   # MCP tools server 実体
+├── mcp_server.py         # 互換エントリーポイント
+├── tools.py              # Web検索・スクレイピング実装
+├── mlx_chat.py           # 既存CLI (直接ツール実行)
+└── mlx_chat_mcp.py       # 既存CLI (MCP経由)
+```
+
+## OpenAI互換 API の起動
 
 ```bash
-BRAVE_SEARCH_API_KEY=your_api_key_here
+./scripts/run_openai_api.sh
+# または
+uvicorn api.main:app --host 0.0.0.0 --port 44448
 ```
 
-## 2) 起動 (Gemma 4 対話)
+OpenAPI は以下で確認できます。
 
-### 従来版（ツール直接実行）
+- [http://localhost:44448/docs](http://localhost:44448/docs)
 
-ターミナルで以下のコマンドを入力します：
+## API 利用例
+
+### モデル一覧
+
+```bash
+curl http://localhost:44448/v1/models
+```
+
+### Chat Completions (非ストリーム)
+
+```bash
+curl http://localhost:44448/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma-4-e4b-it",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "stream": false
+  }'
+```
+
+### Chat Completions (ストリーム)
+
+```bash
+curl -N http://localhost:44448/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma-4-e4b-it",
+    "messages": [{"role": "user", "content": "Pythonの最新情報を教えて"}],
+    "stream": true
+  }'
+```
+
+### ツール呼び出しを許可するリクエスト
+
+```bash
+curl http://localhost:44448/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemma-4-e4b-it",
+    "messages": [{"role": "user", "content": "最新のLLMニュースを調べて"}],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "search_web",
+          "description": "Search the web",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": {"type": "string"}
+            },
+            "required": ["query"]
+          }
+        }
+      }
+    ]
+  }'
+```
+
+## IDE 設定例
+
+### Zed
+
+```json
+{
+  "language_models": {
+    "gemma4-local": {
+      "provider": "openai",
+      "api_url": "http://localhost:44448/v1",
+      "model": "gemma-4-e4b-it"
+    }
+  }
+}
+```
+
+### VSCode / Continue
+
+```json
+{
+  "continue.models": [
+    {
+      "title": "Gemma 4 Local",
+      "provider": "openai",
+      "baseUrl": "http://localhost:44448/v1",
+      "model": "gemma-4-e4b-it"
+    }
+  ]
+}
+```
+
+## MCP Tools Server
+
+既存と同じ起動方法です。
+
+```bash
+python mcp_server.py
+```
+
+`mcp_server.py` は互換エントリーポイントで、実体は `mcp/tools_server.py` です。
+
+## 既存CLI
 
 ```bash
 gemma4
-# または
 python mlx_chat.py
-```
-
-### MCP版（推奨）
-
-MCP (Model Context Protocol) 経由でツールを実行する版：
-
-```bash
 python mlx_chat_mcp.py
 ```
-
-**メリット:**
-- ツールロジックが独立し、メンテナンス性が向上
-- 将来的な拡張（Playwright等）が容易
-- 他のクライアントからもツールを再利用可能
-
-以前の Core ML版を動かしたい場合は、以下を実行してください：
-
-```bash
-gemma4 chat
-```
-
-## アーキテクチャ
-
-### ファイル構成
-
-```
-.
-├── mlx_chat.py           # 従来版チャットクライアント（ツール直接実行）
-├── mlx_chat_mcp.py       # MCP対応チャットクライアント
-├── mcp_server.py         # MCPツールサーバー
-├── tools.py              # ツール実装（Brave Search, スクレイピング）
-└── requirements.txt      # Python依存関係
-```
-
-### MCP構成
-
-```
-┌─────────────────┐
-│ mlx_chat_mcp.py │  ← Gemma 4 チャットクライアント
-└────────┬────────┘
-         │ MCP Protocol (stdio)
-         ↓
-┌─────────────────┐
-│  mcp_server.py  │  ← ツールサーバー
-└────────┬────────┘
-         │
-         ↓
-┌─────────────────┐
-│    tools.py     │  ← Brave Search API / BeautifulSoup4
-└─────────────────┘
-```
-
-## 備考
-
-- **Gemma 4**: 最新の Google モデルで、MLX を使用することで Apple Silicon の性能を最大限に引き出します。
-- **Memory**: 32GB RAM 環境では Gemma 4 E4B (4-bit) が非常に高速に動作します。
-- **Intelligence**: 以前の 270M モデルと比較して、推論能力が飛躍的に向上しています。
-- **MCP**: Model Context Protocol により、ツールの標準化と拡張性を実現しています。
