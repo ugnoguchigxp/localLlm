@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import json
 import re
 import asyncio
 from typing import Any, Iterable, Generator, List, Dict
 
 from core.model import MLXModelManager, get_model_manager
 from tools import fetch_content, search_web
+from core.repair_util import detect_repair_json, format_repair_prompt
 
 TOOL_CALL_RE = re.compile(r"<\|tool_call\|?>call:(\w+)\{(.*?)\}<tool_call\|?>", re.DOTALL)
 TOOL_ARGS_RE = re.compile(r"(\w+):<\|\"\|>(.*?)<\|\"\|>", re.DOTALL)
 THINK_BLOCK_RE = re.compile(r"<\|channel>thought.*?(?:<channel\|>|$)", re.DOTALL)
 LEGACY_THINK_BLOCK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL)
 INCOMPLETE_TOOL_CALL_RE = re.compile(r"<\|tool_call\|?>call:.*$", re.DOTALL)
+JSON_CODE_BLOCK_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
 def _extract_text_content(content: Any) -> str:
@@ -79,12 +82,46 @@ class ChatEngine:
         return {"name": func_name, "arguments": args}
 
     @staticmethod
-    def sanitize_response(text: str) -> str:
+    def _extract_json_payload(text: str) -> str | None:
+        code_block_match = JSON_CODE_BLOCK_RE.search(text)
+        if code_block_match:
+            candidate = code_block_match.group(1).strip()
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                pass
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = text[start : end + 1].strip()
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    @staticmethod
+    def sanitize_response(text: str, force_json: bool = False) -> str:
+        # Remove thinking/tool tags
         sanitized = THINK_BLOCK_RE.sub("", text)
         sanitized = LEGACY_THINK_BLOCK_RE.sub("", sanitized)
         sanitized = TOOL_CALL_RE.sub("", sanitized)
         sanitized = INCOMPLETE_TOOL_CALL_RE.sub("", sanitized)
         sanitized = sanitized.replace("<channel|>", "").replace("<|channel>thought", "")
+        
+        if force_json:
+            payload = ChatEngine._extract_json_payload(sanitized)
+            if payload is not None:
+                return payload
+        else:
+            code_block_match = JSON_CODE_BLOCK_RE.fullmatch(sanitized.strip())
+            if code_block_match:
+                sanitized = code_block_match.group(1)
+            
         return sanitized.strip()
 
     def _prepare_messages(self, messages: Iterable[dict[str, Any]], allow_tools: bool) -> list[dict[str, str]]:
@@ -161,7 +198,17 @@ class ChatEngine:
             self.model_manager = get_model_manager()
             
         allowed_tools = {_normalize_tool_name(tool) for tool in (tools or [])}
-        prepared_messages = self._prepare_messages(messages, allow_tools=bool(allowed_tools))
+        prepared_input_messages = [dict(message) for message in messages]
+        
+        # Repair mode check
+        repair_data = None
+        last_msg = _extract_text_content(prepared_input_messages[-1].get("content", "")) if prepared_input_messages else ""
+        if last_msg:
+            repair_data = detect_repair_json(last_msg)
+            if repair_data:
+                prepared_input_messages[-1]["content"] = format_repair_prompt(repair_data)
+
+        prepared_messages = self._prepare_messages(prepared_input_messages, allow_tools=bool(allowed_tools))
         retried_plain_answer = False
 
         for _ in range(self.max_tool_rounds + 1):
@@ -187,7 +234,7 @@ class ChatEngine:
                 prepared_messages.append({"role": "user", "content": f"（検索結果）\n{tool_result}\n回答を続けてください。"})
                 continue
 
-            sanitized = self.sanitize_response(raw_response)
+            sanitized = self.sanitize_response(raw_response, force_json=bool(repair_data))
             if sanitized: return sanitized
             if tool_call: return f"Tool '{tool_call['name']}' is unavailable for this request."
 
@@ -206,6 +253,11 @@ class ChatEngine:
         max_tokens: int = 1024,
         temperature: float = 0.0,
     ) -> str:
+        # Repair mode check
+        repair_data = detect_repair_json(user_input)
+        if repair_data:
+            user_input = format_repair_prompt(repair_data)
+            
         self.add_message("user", user_input)
         retried_plain_answer = False
 
@@ -225,7 +277,7 @@ class ChatEngine:
                 self.add_message("user", f"（検索結果）\n{tool_result}\nこの結果をもとに、回答を日本語で生成してください。")
                 continue
 
-            sanitized = self.sanitize_response(raw_response)
+            sanitized = self.sanitize_response(raw_response, force_json=bool(repair_data))
             if sanitized:
                 self.add_message("assistant", raw_response.strip())
                 return sanitized
