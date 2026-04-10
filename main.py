@@ -9,7 +9,7 @@ os.environ["PYTHONWARNINGS"] = "ignore"
 import argparse
 import sys
 import asyncio
-from chat_engine import ChatEngine
+from core.chat_engine import ChatEngine
 
 async def main():
     parser = argparse.ArgumentParser(description="Multi-Backend AI Chat Agent (Local Direct Tooling)")

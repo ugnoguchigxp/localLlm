@@ -6,7 +6,8 @@ class MockBackend(BaseBackend):
     テスト用のモックバックエンド。
     特定の入力に対して特定のタグを含むレスポンスを返す。
     """
-    def __init__(self):
+    def __init__(self, verbose: bool = False):
+        super().__init__(verbose=verbose)
         self.model_path = None
 
     def load_model(self, model_path: str):
