@@ -118,6 +118,21 @@ class ChatEngine:
 
         return prepared
 
+    def _run_tool_sync(self, tool_call: dict[str, Any]) -> str:
+        name = _normalize_tool_name(tool_call["name"])
+        arguments = tool_call.get("arguments", {})
+
+        try:
+            if name == "search_web":
+                query = arguments.get("query") or arguments.get("q")
+                return search_web(query)
+            if name == "fetch_content":
+                url = arguments.get("url")
+                return fetch_content(url)
+            return f"Error: Unknown tool '{name}'"
+        except Exception as e:
+            return f"Error: Local tool execution failed ({str(e)})"
+
     async def _run_tool_async(self, tool_call: dict[str, Any]) -> str:
         name = _normalize_tool_name(tool_call["name"])
         arguments = tool_call.get("arguments", {})
@@ -182,6 +197,49 @@ class ChatEngine:
                 prepared_messages.append({"role": "user", "content": "思考過程やタグを出力せず、最終回答のみを返してください。"})
                 continue
             return "回答を生成できませんでした。"
+        return "上限に達しました。"
+
+    # CLI 単発実行用 (セッション履歴を維持)
+    def run_turn(
+        self,
+        user_input: str,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> str:
+        self.add_message("user", user_input)
+        retried_plain_answer = False
+
+        for _ in range(self.max_tool_rounds + 1):
+            raw_response = "".join(
+                self.model_manager.generate_stream(
+                    self.messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            )
+
+            tool_call = self.parse_tool_call(raw_response)
+            if tool_call:
+                tool_result = self._run_tool_sync(tool_call)
+                self.add_message("assistant", raw_response.strip())
+                self.add_message("user", f"（検索結果）\n{tool_result}\nこの結果をもとに、回答を日本語で生成してください。")
+                continue
+
+            sanitized = self.sanitize_response(raw_response)
+            if sanitized:
+                self.add_message("assistant", raw_response.strip())
+                return sanitized
+
+            if not retried_plain_answer:
+                retried_plain_answer = True
+                self.add_message("assistant", raw_response.strip())
+                self.add_message("user", "思考過程やタグを出力せず、最終回答のみを返してください。")
+                continue
+
+            self.add_message("assistant", raw_response.strip())
+            return "回答を生成できませんでした。"
+
+        self.add_message("assistant", "上限に達しました。")
         return "上限に達しました。"
 
     # CLI 用 (ストリーミング対話)
@@ -255,4 +313,3 @@ class ChatEngine:
             self.add_message("assistant", full_resp.strip())
             break
         print("\n")
-

@@ -12,7 +12,8 @@ class MockBackend(BaseBackend):
 
     def load_model(self, model_path: str):
         self.model_path = model_path
-        print(f"Mock model loaded: {model_path}")
+        if self.verbose:
+            print(f"Mock model loaded: {model_path}")
 
     def generate_stream(self, messages: List[Dict[str, str]], **kwargs) -> Generator[str, None, None]:
         last_user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")

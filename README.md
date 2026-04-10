@@ -69,6 +69,66 @@ bash scripts/install_path.sh
 # 実行後、指示に従って shell を再起動または source してください
 ```
 
+### 4. CLI セッション維持モード (サーバー不要)
+
+`main.py` / `scripts/gemma4` は単発実行モードをサポートしています。  
+`--prompt` を付けると1回だけ推論し、`session_id` を含むJSONを返します。
+
+```bash
+./scripts/gemma4 --prompt "Rustの所有権を一言で説明して"
+```
+
+レスポンス例:
+
+```json
+{"session_id":"sess_xxxxx","session_created":true,"backend":"mlx","model":"mlx-community/gemma-4-e4b-it-4bit","message_count":3,"response":"..."}
+```
+
+同じセッションを継続するには `--session-id` を再指定します。
+
+```bash
+./scripts/gemma4 --session-id sess_xxxxx --prompt "もう少し詳しく"
+```
+
+主なオプション:
+
+- `--prompt`: 単発実行モード
+- `--session-id`: 既存セッションの継続
+- `--no-session`: セッションを保存しない
+- `--session-dir`: セッション保存先ディレクトリを指定
+- `--output text`: JSONではなく回答テキストのみ出力
+
+セッション保存先のデフォルトは `~/.localLlm/sessions` です。
+
+### 5. 他プロジェクトからの利用 (CLI連携)
+
+別プロジェクトからサブプロセスとしてこのCLIを呼び出す場合は、`--prompt` + JSON出力を前提にすると扱いやすくなります。
+
+連携フロー（推奨）:
+
+1. 初回リクエストは `--prompt` のみで実行
+2. 返ってきた `session_id` を呼び出し元で保持
+3. 2回目以降は `--session-id <取得したID>` を付けて実行
+
+```bash
+# 初回
+./scripts/gemma4 --prompt "設計方針を3点で"
+
+# 継続
+./scripts/gemma4 --session-id sess_xxxxx --prompt "2点目を詳しく"
+```
+
+返却JSONの主な項目:
+
+- `session_id`: 継続会話に使うセッションID
+- `session_created`: 初回作成かどうか (`true/false`)
+- `backend`: 使用バックエンド (`mlx` / `ollama` / `bonsai` など)
+- `model`: 実際に使用したモデル名
+- `message_count`: 現在セッションに保持されているメッセージ数
+- `response`: アシスタントの回答本文
+
+テキスト本文だけ必要な場合は `--output text` を指定してください。
+
 ---
 
 ## 🛠️ ディレクトリ構成

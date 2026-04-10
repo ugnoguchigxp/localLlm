@@ -9,10 +9,12 @@ class BonsaiBackend(MLXBackend):
     
     def load_model(self, model_path: str):
         # 1-bitモデルのロードにはPrismMLのMLXフォークが必要である旨を表示
-        print(f"Loading 1-bit Bonsai model: {model_path}...")
+        if self.verbose:
+            print(f"Loading 1-bit Bonsai model: {model_path}...")
         try:
             super().load_model(model_path)
-            print("Successfully loaded model using MLX kernels.")
+            if self.verbose:
+                print("Successfully loaded model using MLX kernels.")
         except Exception as e:
             print(f"Error: 1-bit Bonsai requires the PrismML MLX fork.")
             print("Please follow the setup instructions in implementation_plan.md")
